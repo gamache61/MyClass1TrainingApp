@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>CDL Driving</title>
+  <style>
+    body { margin:0; overflow:hidden; background:#2d613e; font-family:Segoe UI,sans-serif; color:#fff; }
+    canvas { position:fixed; inset:0; width:100vw; height:100vh; display:block; }
+    #topBar { position:fixed; top:0; left:0; right:0; z-index:10; background:rgba(0,0,0,.90); border-bottom:2px solid #555; pointer-events:none; }
+    #coach { text-align:center; padding:8px 10px 2px; font-weight:800; font-size:16px; color:#ffd700; line-height:1.3; }
+    #gpsStrip { text-align:center; padding:3px 10px 7px; min-height:26px; }
+    #gpsInner { display:inline-block; font-size:15px; font-weight:900; letter-spacing:2px; padding:3px 22px; border-radius:6px; color:#111; min-width:160px; }
+    #leverWrap { position:fixed; left:50%; bottom:78px; transform:translateX(-50%); width:min(72vw,440px); height:100px; z-index:25; touch-action:none; pointer-events:auto; outline:none; -webkit-tap-highlight-color:transparent; user-select:none; -webkit-user-select:none; }
+    #ball { position:absolute; left:50%; top:50%; width:68px; height:68px; transform:translate(-50%,-50%); border-radius:50%; background:radial-gradient(circle at 30% 30%, #666, #111); border:2px solid #666; touch-action:none; pointer-events:auto; outline:none; -webkit-tap-highlight-color:transparent; user-select:none; -webkit-user-select:none; }
+    #ball:focus { outline:none; }
+    #bottomBar { position:fixed; left:0; right:0; bottom:0; z-index:40; display:grid; grid-template-columns:repeat(5,1fr); gap:5px; padding:5px 6px 8px; box-sizing:border-box; background:rgba(0,0,0,.6); pointer-events:auto; }
+    .tb { height:38px; border-radius:8px; border:2px solid #666; background:#111d; color:#fff; font-weight:800; font-size:11px; pointer-events:auto; touch-action:manipulation; -webkit-tap-highlight-color:transparent; outline:none; user-select:none; -webkit-user-select:none; }
+    .tb.on { border-color:#ffd700; color:#ffd700; background:#2a2000; }
+    .tb:focus { outline:none; }
+    .tb:active { transform:scale(0.97); }
+    * { -webkit-tap-highlight-color:transparent; }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="topBar">
+  <div id="coach">Trainer: Getting ready...</div>
+  <div id="gpsStrip"><div id="gpsInner">&nbsp;</div></div>
+</div>
+<div id="leverWrap"><div id="ball"></div></div>
+<div id="bottomBar">
+  <button id="bLights" class="tb" type="button">LIGHTS</button>
+  <button id="bL"      class="tb" type="button">SIG L</button>
+  <button id="bR"      class="tb" type="button">SIG R</button>
+  <button id="zoom"    class="tb" type="button">ZOOM OUT</button>
+  <button id="modeBtn" class="tb" type="button">TRAINING</button>
+</div>
+
+<script>
+const c=document.getElementById('c'), x=c.getContext('2d');
+function rs(){c.width=innerWidth;c.height=innerHeight;} addEventListener('resize',rs); rs();
+
+if(!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect=function(px,py,pw,ph,r){
+    r=r||0;this.beginPath();this.moveTo(px+r,py);this.lineTo(px+pw-r,py);
+    this.quadraticCurveTo(px+pw,py,px+pw,py+r);this.lineTo(px+pw,py+ph-r);
+    this.quadraticCurveTo(px+pw,py+ph,px+pw-r,py+ph);this.lineTo(px+r,py+ph);
+    this.quadraticCurveTo(px,py+ph,px,py+ph-r);this.lineTo(px,py+r);
+    this.quadraticCurveTo(px,py,px+r,py);
+  };
+}
+
+const ROAD_W=300,GRID_SPACING=2600,LIGHT_SCALE=2.6,LIGHT_PHASE_SECONDS=15;
+const TARGET_TOP_KMH=50,KMH_PER_SPEED=TARGET_TOP_KMH/16.0;
+const BOTTOM_BAR_H=56,STICK_BOTTOM=BOTTOM_BAR_H+8,STICK_H=100,STICK_CLEAR=240;
+function targetTruckScreenY(){return(c.height-STICK_BOTTOM-STICK_H)-STICK_CLEAR;}
+const LIGHT_REACH=ROAD_W*0.78+40,SIGN_H=100,SIGN_OFFSET=LIGHT_REACH+SIGN_H/2+30;
+
+const STEER_DEAD=0.12,STEER_RATE_PER_FRAME=0.004,STEER_MAX=0.26,STEER_RETURN=0.008,TURN_FACTOR=0.22;
+const THROTTLE_DEAD=0.10,IDLE_BRAKE=0.967;
+
+let gameMode="training";
+const s=2.25;
+const TRAILER_W=596.25*0.75,TRAILER_H=67.5,TRUCK_W=292.5,TRUCK_H=67.5;
+const LUMBER_W=TRAILER_W*0.72,LUMBER_H=TRAILER_H*0.82;
+
+const S={
+  world:{w:92000,h:92000,rw:ROAD_W},
+  currentZoom:0.35,zoomNear:0.35,zoomFar:0.15,
+  truck:{x:0,y:0,a:0,s:0,st:0,w:TRUCK_W,h:TRUCK_H,maxF:16.0,maxR:-10.0,acc:0.30,br:0.25,fr:0.985},
+  tr:{x:0,y:0,a:0,w:TRAILER_W,h:TRAILER_H},
+  roads:[],lights:[],intersections:[],crosswalks:[],
+  grid:{vXs:[],hYs:[],margin:2200},
+  yard:{x:0,y:0,w:0,h:0,paved:{x:0,y:0,w:0,h:0},entryPt:{x:0,y:0},exitPt:{x:0,y:0},
+        roadW:220,building:{x:0,y:0,w:3040,h:2240},lot:{x:0,y:0,w:0,h:0},
+        trailers:[],nearestIntersectionIndex:-1},
+  steerInput:0,throttleInput:0,
+  keys:{left:false,right:false,up:false,down:false},
+  head:false,l:false,r:false
+};
+
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const rnd=(arr)=>arr[Math.floor(Math.random()*arr.length)];
+
+const gpsInner=document.getElementById('gpsInner');
+function updateGPSStrip(){
+  const step=Trainer.route[Trainer.stepIndex];
+  if(!step||Trainer.phase==="yard_exit"){gpsInner.style.background="rgba(40,40,40,0.9)";gpsInner.style.color="#888";gpsInner.textContent="GPS: on route";return;}
+  if(step.dir==="left"){gpsInner.style.background="#00aaff";gpsInner.style.color="#000";gpsInner.textContent="◄  TURN LEFT";}
+  else{gpsInner.style.background="#ffd700";gpsInner.style.color="#000";gpsInner.textContent="TURN RIGHT  ►";}
+}
+function syncButtons(){
+  document.getElementById('bLights').classList.toggle('on',S.head);
+  document.getElementById('bL').classList.toggle('on',S.l);
+  document.getElementById('bR').classList.toggle('on',S.r);
+}
+
+const PERSONALITIES={
+  strict:{name:"Sgt. Harris",color:"#ff6b6b",
+    idle:["Eyes on the road.","Stay right unless turning.","Keep your speed down.","Signal every time.","Watch your lane."],
+    yardExit:(d)=>rnd([`Pull out smoothly. Turn ${d} at the exit.`,`Exit the yard, turn ${d}.`,`Turn ${d} when clear.`]),
+    turnInstruction:(d,st)=>rnd([`Turn ${d} at ${st}. Signal first.`,`${st} — ${d} turn. Signal NOW.`,`${st}. Turn ${d}.`]),
+    goodTurn:(d)=>rnd([`Clean ${d}.`,`Good ${d}. Stay in lane.`,`Acceptable ${d}.`]),
+    returnToYard:()=>rnd(["Route done. Back to the ICBC yard.","Return to base — ICBC yard.","Bring her back to the yard."]),
+    arrivedYard:()=>rnd(["Back at the yard.","ICBC yard. Route finished.","Made it back."]),
+    speeding:()=>rnd(["Back off the throttle!","Too fast.","Ease up."]),
+    redLight:()=>rnd(["RED LIGHT! Fail!","You ran a red!","Automatic fail."]),
+    lane:()=>rnd(["Back in your lane.","Stay right.","Crossed centre — correct!"]),
+    signal:(d)=>rnd([`Signal ${d}!`,`${d} signal — use it.`,`No signal. Fix that.`]),
+    routeComplete:(sc)=>rnd([`Done. Score: ${sc}.`,`${sc}/100.`,`${sc} points.`])},
+  encouraging:{name:"Coach Rivera",color:"#6bffb8",
+    idle:["You're doing great!","Nice and smooth.","Watch your speed.","Looking good!","Fantastic!"],
+    yardExit:(d)=>rnd([`Easy out, turn ${d}!`,`Exit and turn ${d}. You've got this!`,`Slow exit, then ${d}!`]),
+    turnInstruction:(d,st)=>rnd([`${st} — ${d} turn coming up!`,`Next: ${st}, turn ${d}.`,`Swing ${d} at ${st}!`]),
+    goodTurn:(d)=>rnd([`Beautiful ${d}!`,`Perfect!`,`Nailed it!`]),
+    returnToYard:()=>rnd(["Great route! Head back to ICBC!","Back to the yard!","Bring it home!"]),
+    arrivedYard:()=>rnd(["Back at ICBC! Fantastic!","You crushed it!","Amazing work!"]),
+    speeding:()=>rnd(["Easy on the gas!","Slow down.","Just a little fast."]),
+    redLight:()=>rnd(["Red light!","Red means stop!","Watch those lights."]),
+    lane:()=>rnd(["Stay right!","Drift right!","Easy fix — come back."]),
+    signal:(d)=>rnd([`${d} signal!`,`Signal ${d}.`,`Don't forget ${d} signal!`]),
+    routeComplete:(sc)=>rnd([`${sc} points! Fantastic!`,`All done! ${sc}!`,`${sc}/100. Great!`])},
+  casual:{name:"Mike",color:"#ffd700",
+    idle:["Looking good.","Keep it smooth.","Watch that speed.","Stay right.","Keep her steady."],
+    yardExit:(d)=>rnd([`Hook a ${d} out of the yard.`,`Turn ${d} at the exit.`,`Out of the yard, ${d}.`]),
+    turnInstruction:(d,st)=>rnd([`${st}, hang a ${d}.`,`${st} — ${d} turn.`,`Take ${d} at ${st}.`]),
+    goodTurn:(d)=>rnd([`Nice ${d}.`,`Good ${d}.`,`That's it.`]),
+    returnToYard:()=>rnd(["Back to the yard.","Head to ICBC.","Find your way back."]),
+    arrivedYard:()=>rnd(["Back at the yard.","ICBC. Good ride.","Home. Nice drive."]),
+    speeding:()=>rnd(["Ease up.","Too fast.","Back off."]),
+    redLight:()=>rnd(["That was red.","Red means stop.","Watch the lights."]),
+    lane:()=>rnd(["Come right.","Stay in lane.","Nudge back."]),
+    signal:(d)=>rnd([`Signal ${d}.`,`${d} blinker.`,`${d} before the corner.`]),
+    routeComplete:(sc)=>rnd([`Done. ${sc}.`,`${sc} points.`,`${sc}/100.`])}
+};
+const PERSONALITY_KEYS=Object.keys(PERSONALITIES);
+
+const Trainer={
+  score:100,msgTTL:0,personality:null,defaultMsg:"Stay in the right lane.",
+  speedLimitKmh:50,route:[],stepIndex:0,
+  cooldowns:{redLight:0,lane:0,speeding:0,signal:0},
+  phase:"yard_exit",firstTurn:"right",
+  instructionLock:false,requiredTurn:null,turnStartAngle:0,returnPhase:false,
+  pickPersonality(){const key=PERSONALITY_KEYS[Math.floor(Math.random()*PERSONALITY_KEYS.length)];this.personality=PERSONALITIES[key];this.defaultMsg=rnd(this.personality.idle);document.getElementById('coach').style.color=this.personality.color;},
+  say(text,ttl=4.5){this.msgTTL=ttl;this.instructionLock=false;document.getElementById('coach').textContent=this.personality.name+": "+text;},
+  setInstruction(text){this.instructionLock=true;document.getElementById('coach').textContent=this.personality.name+": "+text;},
+  refreshIdle(){this.defaultMsg=rnd(this.personality.idle);},
+  tick(dt){
+    this.msgTTL=Math.max(0,this.msgTTL-dt);
+    if(!this.instructionLock&&this.msgTTL===0){this.refreshIdle();document.getElementById('coach').textContent=this.personality.name+": "+this.defaultMsg;}
+    for(const k in this.cooldowns)this.cooldowns[k]=Math.max(0,this.cooldowns[k]-dt);
+  },
+  addPenalty(pts,event,arg,cdKey=null,ttl=4.5){
+    if(cdKey&&this.cooldowns[cdKey]>0)return;
+    if(cdKey)this.cooldowns[cdKey]=2.5;
+    this.score=Math.max(0,this.score-pts);
+    const msg=this.personality[event]?this.personality[event](arg):"Watch it!";
+    if(!this.instructionLock)this.say(msg,ttl);
+  }
+};
+
+function nearestIntersectionIndex(wx,wy){
+  let best=-1,bestD=Infinity;
+  for(let i=0;i<S.intersections.length;i++){const I=S.intersections[i],d=(wx-I.x)**2+(wy-I.y)**2;if(d<bestD){bestD=d;best=i;}}
+  return best;
+}
+function intersectionStreets(i){
+  const vx=S.grid.vXs,hy=S.grid.hYs,I=S.intersections[i];
+  let si=0,bx=Infinity;for(let k=0;k<vx.length;k++){const d=Math.abs(I.x-vx[k]);if(d<bx){bx=d;si=k;}}
+  let ai=0,by=Infinity;for(let k=0;k<hy.length;k++){const d=Math.abs(I.y-hy[k]);if(d<by){by=d;ai=k;}}
+  return{stName:(100+si)+" St",avName:(100+ai)+" Ave"};
+}
+function intersectionNameFromIndex(i){const{stName,avName}=intersectionStreets(i);return stName+" & "+avName;}
+function buildCircularRoute(){
+  const yardNear=S.yard.nearestIntersectionIndex;
+  if(yardNear<0||S.intersections.length<4)return;
+  const steps=[],dirs=["left","right"],total=S.intersections.length;
+  const numSteps=6+Math.floor(Math.random()*5);
+  let cursor=yardNear;const visited=new Set([cursor]);
+  const outSteps=Math.floor(numSteps*0.6);
+  for(let n=0;n<outSteps;n++){
+    const dir=dirs[n%2],skip=2+Math.floor(Math.random()*3);
+    let next=(cursor+skip)%total,tries=0;
+    while(visited.has(next)&&tries<8){next=(next+1)%total;tries++;}
+    visited.add(next);cursor=next;steps.push({dir,atIntersectionIndex:cursor,isReturn:false});
+  }
+  for(let n=0;n<numSteps-outSteps;n++){
+    const dir=dirs[(outSteps+n)%2],diff=yardNear-cursor,step=diff===0?1:(diff>0?1:-1);
+    cursor=Math.abs((cursor+step*(1+Math.floor(Math.random()*2))+total)%total);
+    steps.push({dir,atIntersectionIndex:cursor,isReturn:false});
+  }
+  steps.push({dir:"right",atIntersectionIndex:yardNear,isReturn:true});
+  Trainer.route=steps;Trainer.stepIndex=0;Trainer.firstTurn=steps[0]?steps[0].dir:"right";Trainer.returnPhase=false;
+}
+
+let lastIntersection=-1;
+function isInYardArea(px,py){const pad=600,pv=S.yard.paved;return px>=(pv.x-pad)&&px<=(pv.x+pv.w+pad)&&py>=(pv.y-pad)&&py<=(pv.y+pv.h+pad);}
+function normalizeAngle(a){while(a>Math.PI)a-=Math.PI*2;while(a<-Math.PI)a+=Math.PI*2;return a;}
+function checkTurnComplete(){
+  if(!Trainer.requiredTurn)return false;
+  const turned=normalizeAngle(S.truck.a-Trainer.turnStartAngle);
+  if(Trainer.requiredTurn==="right"&&turned>0.55){Trainer.requiredTurn=null;Trainer.instructionLock=false;Trainer.say(Trainer.personality.goodTurn("right"),2.5);return true;}
+  if(Trainer.requiredTurn==="left"&&turned<-0.55){Trainer.requiredTurn=null;Trainer.instructionLock=false;Trainer.say(Trainer.personality.goodTurn("left"),2.5);return true;}
+  return false;
+}
+function closestIndex(arr,v){let best=0,bestD=Infinity;for(let i=0;i<arr.length;i++){const d=Math.abs(arr[i]-v);if(d<bestD){bestD=d;best=i;}}return best;}
+function checkLaneKeeping(){
+  if(isInYardArea(S.truck.x,S.truck.y))return;
+  const vXs=S.grid.vXs,hYs=S.grid.hYs;if(!vXs.length||!hYs.length)return;
+  const xi=closestIndex(vXs,S.truck.x),yi=closestIndex(hYs,S.truck.y);
+  const ddx=Math.abs(S.truck.x-vXs[xi]),ddy=Math.abs(S.truck.y-hYs[yi]),onV=(ddx<ddy);
+  const offset=onV?(S.truck.x-vXs[xi]):(S.truck.y-hYs[yi]);
+  const wantSign=onV?((Math.sin(S.truck.a)<0)?1:-1):((Math.cos(S.truck.a)>0)?1:-1);
+  if((offset*wantSign)<0&&Math.abs(S.truck.s)>0.25)
+    if(!(S.r&&Math.abs(offset)<ROAD_W*0.45))Trainer.addPenalty(2,"lane",null,"lane",3.0);
+}
+function updateTrainerPhase(){
+  const inYard=isInYardArea(S.truck.x,S.truck.y);
+  if(Trainer.phase==="yard_exit"){
+    if(!Trainer.instructionLock){Trainer.requiredTurn=Trainer.firstTurn;Trainer.turnStartAngle=S.truck.a;Trainer.setInstruction(Trainer.personality.yardExit(Trainer.firstTurn));}
+    if(!inYard)Trainer.phase="on_road";return;
+  }
+  if(Trainer.returnPhase&&inYard){
+    Trainer.returnPhase=false;Trainer.instructionLock=false;Trainer.say(Trainer.personality.arrivedYard(),6);
+    setTimeout(()=>{buildCircularRoute();Trainer.stepIndex=0;Trainer.requiredTurn=null;Trainer.phase="on_road";updateGPSStrip();const step=Trainer.route[0];if(step)Trainer.setInstruction(Trainer.personality.turnInstruction(step.dir,intersectionNameFromIndex(step.atIntersectionIndex)));},5000);return;
+  }
+  if(Trainer.requiredTurn){
+    if(checkTurnComplete()){
+      const step=Trainer.route[Trainer.stepIndex];
+      if(step){
+        if(step.isReturn){Trainer.returnPhase=true;Trainer.requiredTurn=null;Trainer.instructionLock=false;Trainer.say(Trainer.personality.returnToYard(),6);}
+        else{Trainer.requiredTurn=step.dir;Trainer.turnStartAngle=S.truck.a;Trainer.setInstruction(Trainer.personality.turnInstruction(step.dir,intersectionNameFromIndex(step.atIntersectionIndex)));}
+      }else{Trainer.returnPhase=true;Trainer.instructionLock=false;Trainer.say(Trainer.personality.returnToYard(),6);}
+    }
+  }
+}
+
+function isInsideRect(px,py,rx,ry,rw,rh){return px>=rx&&px<=rx+rw&&py>=ry&&py<=ry+rh;}
+function addIntersectionLightsAndCrosswalks(xx,yy,R){
+  const d=R*0.78,sep=R*0.20;
+  S.lights.push({x:xx-sep,y:yy-d,group:"NS"},{x:xx+sep,y:yy-d,group:"NS"},{x:xx-sep,y:yy+d,group:"NS"},{x:xx+sep,y:yy+d,group:"NS"});
+  S.lights.push({x:xx-d,y:yy-sep,group:"EW"},{x:xx-d,y:yy+sep,group:"EW"},{x:xx+d,y:yy-sep,group:"EW"},{x:xx+d,y:yy+sep,group:"EW"});
+  const inset=R*0.18,hr=R/2,pad=R*0.12;
+  S.crosswalks.push({x1:xx-hr-pad,y1:yy-inset,x2:xx+hr+pad,y2:yy-inset},{x1:xx-hr-pad,y1:yy+inset,x2:xx+hr+pad,y2:yy+inset},{x1:xx-inset,y1:yy-hr-pad,x2:xx-inset,y2:yy+hr+pad},{x1:xx+inset,y1:yy-hr-pad,x2:xx+inset,y2:yy+hr+pad});
+}
+function placeYardInsideTwoBlocks(vXs,hYs){
+  const bx=Math.max(0,Math.floor(vXs.length*0.30)),by=Math.max(0,Math.floor(hYs.length*0.40));
+  const R=S.world.rw,SAFETY=R/2+80;
+  S.yard.paved.x=vXs[bx]+SAFETY;S.yard.paved.y=hYs[by]+SAFETY;
+  S.yard.paved.w=vXs[bx+2]-SAFETY-S.yard.paved.x;S.yard.paved.h=hYs[by+2]-SAFETY-S.yard.paved.y;
+  S.yard.x=S.yard.paved.x;S.yard.y=S.yard.paved.y;S.yard.w=S.yard.paved.w;S.yard.h=S.yard.paved.h;
+  S.yard.entryPt.x=vXs[bx+2]-R/2;S.yard.entryPt.y=S.yard.paved.y+S.yard.paved.h*0.30;
+  S.yard.exitPt.x=vXs[bx+2]-R/2;S.yard.exitPt.y=S.yard.paved.y+S.yard.paved.h*0.70;
+  const b=S.yard.building;
+  b.x=S.yard.paved.x+(S.yard.paved.w-b.w)/2;b.y=S.yard.paved.y+(S.yard.paved.h-b.h)/2;
+  S.yard.lot.x=S.yard.paved.x;S.yard.lot.y=b.y+b.h+100;S.yard.lot.w=S.yard.paved.w;S.yard.lot.h=1400;
+  const lb=S.yard.paved.y+S.yard.paved.h;if(S.yard.lot.y+S.yard.lot.h>lb)S.yard.lot.h=lb-S.yard.lot.y-40;
+  S.yard.trailers.length=0;
+  const txBase=S.yard.paved.x+420;
+  for(let i=0;i<6;i++)S.yard.trailers.push({x:txBase,y:S.yard.paved.y+420+i*300,a:Math.PI/2,w:TRAILER_W,h:TRAILER_H});
+  for(let i=0;i<5;i++)S.yard.trailers.push({x:S.yard.paved.x+900+i*420,y:S.yard.paved.y+S.yard.paved.h-420,a:0,w:TRAILER_W,h:TRAILER_H});
+}
+function buildCityGrid(){
+  const W=S.world.w,H=S.world.h,R=S.world.rw,margin=S.grid.margin;
+  const vXs=[],hYs=[];
+  for(let xx=margin;xx<=W-margin;xx+=GRID_SPACING)vXs.push(xx);
+  for(let yy=margin;yy<=H-margin;yy+=GRID_SPACING)hYs.push(yy);
+  S.grid.vXs=vXs.slice();S.grid.hYs=hYs.slice();
+  vXs.forEach(xx=>S.roads.push({x:xx-R/2,y:0,w:R,h:H,t:'v'}));
+  hYs.forEach(yy=>S.roads.push({x:0,y:yy-R/2,w:W,h:R,t:'h'}));
+  for(const xx of vXs)for(const yy of hYs)S.intersections.push({x:xx,y:yy});
+  placeYardInsideTwoBlocks(vXs,hYs);
+  S.yard.nearestIntersectionIndex=nearestIntersectionIndex(S.yard.entryPt.x,S.yard.entryPt.y);
+  const pv=S.yard.paved,exX=pv.x-200,exY=pv.y-200,exW=pv.w+400,exH=pv.h+400;
+  for(let i=0;i<S.intersections.length;i++){
+    const I=S.intersections[i],excl=isInsideRect(I.x,I.y,exX,exY,exW,exH);
+    const bL=S.lights.length,bC=S.crosswalks.length;
+    addIntersectionLightsAndCrosswalks(I.x,I.y,R);
+    for(let j=bL;j<bL+8;j++)S.lights[j].disabled=excl;
+    for(let j=bC;j<bC+4;j++)S.crosswalks[j].disabled=excl;
+  }
+}
+function spawnParkedAtBackOfYard(){
+  Trainer.pickPersonality();const heading=0;
+  S.truck.x=S.yard.paved.x+700;S.truck.y=S.yard.paved.y+S.yard.paved.h*0.85;
+  S.truck.a=heading;S.truck.s=0;S.truck.st=0;
+  const pivotX=S.truck.x-Math.cos(heading)*101.25,pivotY=S.truck.y-Math.sin(heading)*101.25;
+  S.tr.a=heading;S.tr.x=pivotX-Math.cos(S.tr.a)*(S.tr.w/2-33.75);S.tr.y=pivotY-Math.sin(S.tr.a)*(S.tr.w/2-33.75);
+  S.head=false;S.l=false;S.r=false;
+  Trainer.score=100;Trainer.phase="yard_exit";Trainer.stepIndex=0;
+  Trainer.instructionLock=false;Trainer.requiredTurn=null;Trainer.returnPhase=false;
+  Trainer.turnStartAngle=heading;Trainer.msgTTL=0;
+  buildCircularRoute();lastIntersection=-1;
+  Trainer.requiredTurn=Trainer.firstTurn;Trainer.turnStartAngle=heading;
+  Trainer.setInstruction(Trainer.personality.yardExit(Trainer.firstTurn));
+  syncButtons();updateGPSStrip();
+}
+buildCityGrid();spawnParkedAtBackOfYard();
+
+const ball=document.getElementById('ball'),lw=document.getElementById('leverWrap');
+let stickActive=false;
+function setStick(clientX,clientY){
+  const r=lw.getBoundingClientRect(),bs=68,maxX=r.width-bs,maxY=r.height-bs;
+  const px=clamp(clientX-r.left-bs/2,0,maxX),py=clamp(clientY-r.top-bs/2,0,maxY);
+  ball.style.left=(px+bs/2)+"px";ball.style.top=(py+bs/2)+"px";
+  S.steerInput=(maxX?px/maxX:0.5)*2-1;S.throttleInput=-((maxY?py/maxY:0.5)*2-1);
+}
+function resetStick(){S.steerInput=0;S.throttleInput=0;ball.style.left='50%';ball.style.top='50%';}
+ball.addEventListener('pointerdown',e=>{e.preventDefault();stickActive=true;ball.setPointerCapture(e.pointerId);setStick(e.clientX,e.clientY);});
+ball.addEventListener('pointermove',e=>{if(stickActive)setStick(e.clientX,e.clientY);});
+ball.addEventListener('pointerup',e=>{e.preventDefault();stickActive=false;resetStick();});
+ball.addEventListener('pointercancel',()=>{stickActive=false;resetStick();});
+window.addEventListener('keydown',e=>{if(e.key==='ArrowLeft'){S.keys.left=true;e.preventDefault();}if(e.key==='ArrowRight'){S.keys.right=true;e.preventDefault();}if(e.key==='ArrowUp'){S.keys.up=true;e.preventDefault();}if(e.key==='ArrowDown'){S.keys.down=true;e.preventDefault();}});
+window.addEventListener('keyup',e=>{if(e.key==='ArrowLeft')S.keys.left=false;if(e.key==='ArrowRight')S.keys.right=false;if(e.key==='ArrowUp')S.keys.up=false;if(e.key==='ArrowDown')S.keys.down=false;});
+document.getElementById('bLights').addEventListener('click',()=>{S.head=!S.head;syncButtons();});
+document.getElementById('bL').addEventListener('click',()=>{S.l=!S.l;if(S.l)S.r=false;syncButtons();});
+document.getElementById('bR').addEventListener('click',()=>{S.r=!S.r;if(S.r)S.l=false;syncButtons();});
+document.getElementById('zoom').addEventListener('click',()=>{S.currentZoom=(S.currentZoom===S.zoomNear)?S.zoomFar:S.zoomNear;document.getElementById('zoom').textContent=S.currentZoom===S.zoomNear?"ZOOM OUT":"ZOOM IN";});
+document.getElementById('modeBtn').addEventListener('click',()=>{gameMode=(gameMode==="training")?"test":"training";document.getElementById('modeBtn').textContent=gameMode==="training"?"TRAINING":"TEST MODE";document.getElementById('modeBtn').classList.toggle('on',gameMode==="test");Trainer.say(gameMode==="test"?"Test mode.":"Back to training.",4);});
+
+function phaseNow(){return Math.floor(performance.now()/1000/LIGHT_PHASE_SECONDS)%2;}
+function lightIsRedGroup(group){const ng=(phaseNow()===0);return group==="NS"?!ng:ng;}
+
+function drawTruck(){
+  const t=S.truck,blink=(Math.floor(performance.now()/350)%2)===0;
+  const steerAngle=clamp(S.truck.st*1.6,-0.68,0.68);
+  const halfH=(30*s)/2,wW=12*s,wH=5*s;
+  x.save();x.translate(t.x,t.y);x.rotate(t.a);
+  x.fillStyle="#111";x.fillRect((-130*s)/2,(-30*s)/6,(130*s)-(50*s),(30*s)/3);x.fillRect(0,(-30*s)/2,60*s,30*s);
+  x.fillStyle="#000";x.fillRect(-62*s,-12*s,12*s,6*s);x.fillRect(-62*s,6*s,12*s,6*s);x.fillRect(-45*s,-12*s,12*s,6*s);x.fillRect(-45*s,6*s,12*s,6*s);x.fillRect(40*s,(-30*s)/2-2,12*s,5*s);x.fillRect(40*s,(30*s)/2-3,12*s,5*s);
+  x.fillStyle="#800000";x.fillRect(-10*s,(-30*s)/2,40*s,30*s);x.fillRect(30*s,(-30*s)/2+4*s,30*s,(30*s)-8*s);
+  x.fillStyle="#FFD700";for(let i=0;i<4;i++)x.fillRect(27*s,(-30*s)/2+4*s+(i*6.5*s),3*s,3*s);
+  x.fillStyle="#777";x.fillRect(-12*s,(-30*s)/2-5*s,6*s,6*s);x.fillRect(-12*s,(30*s)/2-1*s,6*s,6*s);
+  x.fillStyle="#aaa";x.fillRect(30*s,(-30*s)/2-4*s,4*s,5*s);x.fillRect(30*s,(30*s)/2-1*s,4*s,5*s);
+  const stackX=-2*s,stackR=2.0*s;
+  [(-halfH+stackR),(halfH-stackR)].forEach(sy=>{
+    x.fillStyle="#2a2a2a";x.beginPath();x.arc(stackX,sy,stackR+0.8*s,0,Math.PI*2);x.fill();
+    x.fillStyle="#777";x.beginPath();x.arc(stackX,sy,stackR,0,Math.PI*2);x.fill();
+    x.fillStyle="#111";x.beginPath();x.arc(stackX,sy,stackR*0.42,0,Math.PI*2);x.fill();
+    x.fillStyle="rgba(255,255,255,0.3)";x.beginPath();x.arc(stackX-0.5*s,sy-0.5*s,stackR*0.28,0,Math.PI*2);x.fill();
+  });
+  x.fillStyle=S.head?"rgba(255,255,180,1)":"rgba(55,55,45,1)";x.fillRect(54*s,(-30*s)/2-4*s,4*s,5*s);x.fillRect(54*s,(30*s)/2-1*s,4*s,5*s);
+  if(S.head){x.fillStyle="rgba(255,255,150,0.20)";x.beginPath();x.arc(56*s,(-30*s)/2,11*s,0,Math.PI*2);x.fill();x.beginPath();x.arc(56*s,(30*s)/2,11*s,0,Math.PI*2);x.fill();}
+  if(blink){x.fillStyle="rgba(255,165,0,1)";if(S.l){x.beginPath();x.arc(50*s,(-30*s)/2-6*s,4*s,0,Math.PI*2);x.fill();}if(S.r){x.beginPath();x.arc(50*s,(30*s)/2+6*s,4*s,0,Math.PI*2);x.fill();}}
+  x.restore();
+  x.save();x.translate(t.x,t.y);x.rotate(t.a);
+  [(-halfH),(halfH)].forEach(wy=>{
+    x.save();x.translate(40*s,wy);x.rotate(steerAngle);
+    x.fillStyle="#111";x.fillRect(-wW/2,-wH/2,wW,wH);x.strokeStyle="#555";x.lineWidth=1.5;x.strokeRect(-wW/2,-wH/2,wW,wH);
+    x.strokeStyle="#2a2a2a";x.lineWidth=1;x.beginPath();x.moveTo(0,-wH/2);x.lineTo(0,wH/2);x.stroke();x.restore();
+  });
+  x.restore();
+}
+
+function drawTrailer(){
+  const tw=S.tr.w,th=S.tr.h;
+  x.save();x.translate(S.tr.x,S.tr.y);x.rotate(S.tr.a);
+  x.fillStyle="rgba(0,0,0,0.3)";x.fillRect(-tw/2+5,-th/2+5,tw,th);
+  for(let i=-th/2;i<th/2;i+=7.5){x.fillStyle=(Math.floor(i/7.5)%2===0)?"#5d4037":"#4a352f";x.fillRect(-tw/2,i,tw,7.5);}
+  x.fillStyle="#b0b0b0";x.fillRect(-tw/2,-th/2,tw,4);x.fillRect(-tw/2,th/2-4,tw,4);
+  for(let i=-tw/2;i<tw/2;i+=40){x.fillStyle=(Math.floor(i/40)%2===0)?"#d32f2f":"#ffffff";x.fillRect(i,-th/2+1,20,2);x.fillRect(i,th/2-3,20,2);}
+  x.fillStyle="#111";x.strokeStyle="#ffd700";x.lineWidth=2;
+  for(let i=-tw/2+120;i<tw/2-80;i+=110){x.fillRect(i,th/2-6,12,8);x.beginPath();x.moveTo(i+6,th/2-4);x.lineTo(i+6,-th/2+4);x.stroke();}
+  x.fillStyle="#000";x.fillRect(-tw/2+80,-th/2-4,90,4);x.fillRect(-tw/2+80,th/2,90,4);
+  const lw2=LUMBER_W,lh2=LUMBER_H,lx=-lw2/2,ly=-lh2/2;
+  x.fillStyle="rgba(0,0,0,0.35)";x.fillRect(lx+4,ly+4,lw2,lh2);
+  const bc=["#e8c97a","#ddb96a","#e8c97a","#d4a95e","#e0c172","#ddb96a","#e8c97a","#d4a95e","#e0c172","#ddb96a","#e8c97a","#d4a95e"];
+  const bh=lh2/12;
+  for(let i=0;i<12;i++){x.fillStyle=bc[i];x.fillRect(lx,ly+i*bh,lw2,bh);x.strokeStyle="rgba(0,0,0,0.25)";x.lineWidth=1;x.beginPath();x.moveTo(lx,ly+i*bh);x.lineTo(lx+lw2,ly+i*bh);x.stroke();}
+  x.strokeStyle="rgba(160,100,30,0.18)";x.lineWidth=1;for(let g=1;g<8;g++){const gy=ly+g*(lh2/8);x.beginPath();x.moveTo(lx+2,gy);x.lineTo(lx+lw2-2,gy+2);x.stroke();}
+  x.strokeStyle="rgba(0,0,0,0.5)";x.lineWidth=2.5;x.strokeRect(lx,ly,lw2,lh2);
+  x.strokeStyle="rgba(255,220,130,0.6)";x.lineWidth=2;x.beginPath();x.moveTo(lx,ly);x.lineTo(lx+lw2,ly);x.stroke();x.beginPath();x.moveTo(lx,ly);x.lineTo(lx,ly+lh2);x.stroke();
+  [lx+lw2*0.20,lx+lw2*0.80].forEach(sx=>{
+    x.fillStyle="#e07b00";x.fillRect(sx-2,ly,4,lh2);x.fillStyle="#ffaa22";x.fillRect(sx-0.8,ly,1.6,lh2);
+    [-1,1].forEach(side=>{const bkx=side>0?sx+2-5:sx-2-5;x.fillStyle="#444";x.fillRect(bkx,ly+lh2/2-5,10,10);x.strokeStyle="#888";x.lineWidth=1;x.strokeRect(bkx,ly+lh2/2-5,10,10);});
+  });
+  x.restore();
+}
+
+function drawSign(label,bgColor,bx,by,sw,sh,angle){
+  x.save();x.translate(bx,by);if(angle)x.rotate(angle);
+  x.fillStyle=bgColor;x.beginPath();x.roundRect(-sw/2,-sh/2,sw,sh,10);x.fill();
+  x.strokeStyle="rgba(255,255,255,0.8)";x.lineWidth=3;x.stroke();
+  x.fillStyle="#fff";x.textAlign="center";x.textBaseline="middle";x.fillText(label,0,0);
+  x.restore();
+}
+function drawIntersectionSigns(){
+  const vXs=S.grid.vXs,hYs=S.grid.hYs;if(!vXs.length||!hYs.length)return;
+  x.save();x.font="bold 58px Segoe UI,sans-serif";
+  for(let si=0;si<vXs.length;si++)for(let ai=0;ai<hYs.length;ai++){
+    const ix=vXs[si],iy=hYs[ai];
+    drawSign((100+ai)+" Ave","#1a5c1a",ix,iy-SIGN_OFFSET,460,SIGN_H,0);
+    drawSign((100+ai)+" Ave","#1a5c1a",ix,iy+SIGN_OFFSET,460,SIGN_H,0);
+    drawSign((100+si)+" St","#1a4a6b",ix-SIGN_OFFSET,iy,460,SIGN_H,-Math.PI/2);
+    drawSign((100+si)+" St","#1a4a6b",ix+SIGN_OFFSET,iy,460,SIGN_H,-Math.PI/2);
+  }
+  x.restore();
+}
+function drawMidBlockSigns(){
+  const vXs=S.grid.vXs,hYs=S.grid.hYs;if(!vXs.length||!hYs.length)return;
+  const sideOff=ROAD_W/2+38+8;
+  x.save();x.font="bold 46px Segoe UI,sans-serif";
+  for(let si=0;si<vXs.length;si++){const stName=(100+si)+" St";for(let ai=0;ai<hYs.length-1;ai++){const mx=vXs[si],my=(hYs[ai]+hYs[ai+1])/2;drawSign(stName,"#5d4037",mx-sideOff,my,340,76,-Math.PI/2);drawSign(stName,"#5d4037",mx+sideOff,my,340,76,-Math.PI/2);}}
+  for(let ai=0;ai<hYs.length;ai++){const avName=(100+ai)+" Ave";for(let si=0;si<vXs.length-1;si++){const mx=(vXs[si]+vXs[si+1])/2,my=hYs[ai];drawSign(avName,"#5d4037",mx,my-sideOff,340,76,0);drawSign(avName,"#5d4037",mx,my+sideOff,340,76,0);}}
+  x.restore();
+}
+function drawUpcomingTurnSign(){
+  const step=Trainer.route[Trainer.stepIndex];if(!step||Trainer.phase==="yard_exit")return;
+  const I=S.intersections[step.atIntersectionIndex];if(!I)return;
+  const dist=Math.hypot(S.truck.x-I.x,S.truck.y-I.y);if(dist>GRID_SPACING*0.75)return;
+  const dir=step.dir,{stName,avName}=intersectionStreets(step.atIntersectionIndex);
+  const sw=640,sh=150,approachAngle=S.truck.a;
+  const sx=I.x-Math.cos(approachAngle)*ROAD_W*2.2,sy=I.y-Math.sin(approachAngle)*ROAD_W*2.2;
+  x.save();x.translate(sx,sy);x.rotate(approachAngle+Math.PI/2);
+  x.fillStyle="rgba(0,90,0,0.95)";x.beginPath();x.roundRect(-sw/2,-sh/2,sw,sh,14);x.fill();
+  x.strokeStyle="#fff";x.lineWidth=5;x.stroke();
+  x.fillStyle="#fff";x.font="bold 60px Segoe UI,sans-serif";x.textAlign="center";x.textBaseline="middle";
+  x.fillText(dir==="left"?"◄":"►",dir==="left"?-sw/2+60:sw/2-60,0);
+  x.font="bold 52px Segoe UI,sans-serif";x.fillText(`TURN ${dir.toUpperCase()}`,0,-sh*0.18);
+  x.font="bold 37px Segoe UI,sans-serif";x.fillStyle="rgba(255,255,200,0.95)";x.fillText(`${stName} & ${avName}`,0,sh*0.22);
+  x.fillStyle="#888";x.fillRect(-8,sh/2,16,ROAD_W*0.5);
+  x.restore();
+}
+function drawYard(){
+  const pv=S.yard.paved;x.save();
+  x.fillStyle="#3a3a3a";x.fillRect(pv.x,pv.y,pv.w,pv.h);x.strokeStyle="#555";x.lineWidth=16;x.strokeRect(pv.x,pv.y,pv.w,pv.h);
+  const pl=S.yard.lot;if(pl&&pl.w>0&&pl.h>0){x.fillStyle="#2e2e2e";x.fillRect(pl.x,pl.y,pl.w,pl.h);x.strokeStyle="#484848";x.lineWidth=6;x.strokeRect(pl.x,pl.y,pl.w,pl.h);x.fillStyle="rgba(255,255,255,0.07)";x.font="bold 120px Segoe UI,sans-serif";x.textAlign="center";x.textBaseline="middle";x.fillText("PARKING",pl.x+pl.w/2,pl.y+pl.h/2);}
+  x.strokeStyle="#4a4a4a";x.lineWidth=S.yard.roadW;x.lineCap="round";x.lineJoin="round";
+  const ex=S.yard.entryPt.x,ey=S.yard.entryPt.y,xR=pv.x+pv.w-360,xL=pv.x+360,yT=pv.y+360,yB=pv.y+pv.h-360;
+  x.beginPath();x.moveTo(ex,ey);x.lineTo(xR,ey);x.arcTo(xR,yT,xR-360,yT,520);x.lineTo(xL+360,yT);x.arcTo(xL,yT,xL,yT+360,520);x.lineTo(xL,yB-360);x.arcTo(xL,yB,xL+360,yB,520);x.lineTo(xR-360,yB);x.arcTo(xR,yB,xR,S.yard.exitPt.y,520);x.lineTo(xR,S.yard.exitPt.y);x.lineTo(S.yard.exitPt.x,S.yard.exitPt.y);x.stroke();
+  x.strokeStyle="rgba(255,220,0,0.45)";x.lineWidth=5;x.setLineDash([60,40]);
+  x.beginPath();x.moveTo(ex,ey);x.lineTo(xR,ey);x.arcTo(xR,yT,xR-360,yT,520);x.lineTo(xL+360,yT);x.arcTo(xL,yT,xL,yT+360,520);x.lineTo(xL,yB-360);x.arcTo(xL,yB,xL+360,yB,520);x.lineTo(xR-360,yB);x.arcTo(xR,yB,xR,S.yard.exitPt.y,520);x.lineTo(xR,S.yard.exitPt.y);x.lineTo(S.yard.exitPt.x,S.yard.exitPt.y);x.stroke();x.setLineDash([]);
+  const b=S.yard.building;x.fillStyle="#8d99ae";x.fillRect(b.x,b.y,b.w,b.h);x.strokeStyle="rgba(180,220,255,0.28)";x.lineWidth=4;
+  const winCols=12,winRows=6,winW=b.w/winCols,winH=b.h/winRows;
+  for(let wc=1;wc<winCols;wc++){x.beginPath();x.moveTo(b.x+wc*winW,b.y+20);x.lineTo(b.x+wc*winW,b.y+b.h-20);x.stroke();}
+  for(let wr=1;wr<winRows;wr++){x.beginPath();x.moveTo(b.x+20,b.y+wr*winH);x.lineTo(b.x+b.w-20,b.y+wr*winH);x.stroke();}
+  x.strokeStyle="rgba(0,0,0,0.35)";x.lineWidth=8;x.strokeRect(b.x,b.y,b.w,b.h);
+  x.fillStyle="#fff";x.font="bold 220px Segoe UI,sans-serif";x.textAlign="center";x.textBaseline="middle";x.fillText("ICBC",b.x+b.w/2,b.y+b.h/2);
+  for(const T of S.yard.trailers){x.save();x.translate(T.x,T.y);x.rotate(T.a);x.fillStyle="#cfcfcf";x.fillRect(-T.w/2,-T.h/2,T.w,T.h);x.strokeStyle="#777";x.lineWidth=4;x.strokeRect(-T.w/2,-T.h/2,T.w,T.h);x.restore();}
+  x.restore();
+}
+function drawCrosswalk(C){if(C.disabled)return;x.save();x.strokeStyle="rgba(255,255,255,0.95)";x.lineWidth=10;x.setLineDash([16,14]);x.beginPath();x.moveTo(C.x1,C.y1);x.lineTo(C.x2,C.y2);x.stroke();x.setLineDash([]);x.restore();}
+function drawTrafficLight(L){
+  if(L.disabled)return;const red=lightIsRedGroup(L.group),sc=LIGHT_SCALE;
+  x.save();x.translate(L.x,L.y);
+  x.fillStyle="#2a2a2a";x.fillRect(-5*sc,-52*sc,10*sc,52*sc);x.fillStyle="#111";x.fillRect(-12*sc,-42*sc,24*sc,42*sc);x.strokeStyle="#666";x.lineWidth=1.5*sc;x.strokeRect(-12*sc,-42*sc,24*sc,42*sc);
+  x.fillStyle=red?"#f00":"#400";x.beginPath();x.arc(0,-30*sc,5*sc,0,Math.PI*2);x.fill();
+  x.fillStyle=red?"#040":"#0f0";x.beginPath();x.arc(0,-14*sc,5*sc,0,Math.PI*2);x.fill();
+  x.restore();
+}
+function drawWorld(){
+  x.fillStyle="#2d613e";x.fillRect(0,0,S.world.w,S.world.h);
+  S.roads.forEach(r=>{x.fillStyle="#3a3a3a";x.fillRect(r.x,r.y,r.w,r.h);x.strokeStyle="#ffd54a";x.lineWidth=4;x.setLineDash([28,24]);x.beginPath();if(r.t==='h'){x.moveTo(r.x,r.y+r.h/2);x.lineTo(r.x+r.w,r.y+r.h/2);}else{x.moveTo(r.x+r.w/2,r.y);x.lineTo(r.x+r.w/2,r.y+r.h);}x.stroke();x.setLineDash([]);});
+  drawMidBlockSigns();drawIntersectionSigns();drawUpcomingTurnSign();
+  drawYard();S.crosswalks.forEach(drawCrosswalk);S.lights.forEach(drawTrafficLight);
+}
+
+function upd(dt){
+  const ks=(S.keys.left?-1:0)+(S.keys.right?1:0);
+  const kt=(S.keys.up?1:0)+(S.keys.down?-1:0);
+  const steerRaw=ks!==0?ks:S.steerInput;
+  const throtRaw=kt!==0?kt:S.throttleInput;
+
+  const sSign=steerRaw<0?-1:1,sAbs=Math.abs(steerRaw);
+  if(sAbs>STEER_DEAD){const sMapped=(sAbs-STEER_DEAD)/(1-STEER_DEAD);S.truck.st+=sSign*sMapped*STEER_RATE_PER_FRAME;}
+  else{if(S.truck.st>0)S.truck.st=Math.max(0,S.truck.st-STEER_RETURN);else if(S.truck.st<0)S.truck.st=Math.min(0,S.truck.st+STEER_RETURN);}
+  S.truck.st=clamp(S.truck.st,-STEER_MAX,STEER_MAX);
+
+  const tSign=throtRaw<0?-1:1,tAbs=Math.abs(throtRaw);
+  const throt=tAbs<THROTTLE_DEAD?0:tSign*(tAbs-THROTTLE_DEAD)/(1-THROTTLE_DEAD);
+  if(throt>0)S.truck.s+=S.truck.acc*throt;
+  else if(throt<0)S.truck.s+=S.truck.br*throt;
+  else{S.truck.s*=IDLE_BRAKE;if(Math.abs(S.truck.s)<0.04)S.truck.s=0;}
+
+  S.truck.s*=S.truck.fr;S.truck.s=clamp(S.truck.s,S.truck.maxR,S.truck.maxF);
+  S.truck.a+=S.truck.st*(S.truck.s*TURN_FACTOR);
+  S.truck.x+=Math.cos(S.truck.a)*S.truck.s;S.truck.y+=Math.sin(S.truck.a)*S.truck.s;
+
+  const pivotX=S.truck.x-Math.cos(S.truck.a)*101.25,pivotY=S.truck.y-Math.sin(S.truck.a)*101.25;
+  const dx=pivotX-S.tr.x,dy=pivotY-S.tr.y;
+  S.tr.a=Math.atan2(dy,dx);
+  S.tr.x=pivotX-Math.cos(S.tr.a)*(S.tr.w/2-33.75);S.tr.y=pivotY-Math.sin(S.tr.a)*(S.tr.w/2-33.75);
+
+  updateTrainerPhase();Trainer.tick(dt);updateGPSStrip();
+  const kmh=Math.round(Math.abs(S.truck.s)*KMH_PER_SPEED);
+  if(kmh>Trainer.speedLimitKmh+10)Trainer.addPenalty(1,"speeding",null,"speeding",2.5);
+  checkLaneKeeping();
+  if(Trainer.phase!=="yard_exit"){
+    const near=nearestIntersectionIndex(S.truck.x,S.truck.y);
+    if(near>=0){
+      const I=S.intersections[near],dist=Math.hypot(S.truck.x-I.x,S.truck.y-I.y);
+      if(dist<200&&lastIntersection!==near){
+        lastIntersection=near;
+        const fNS=Math.abs(Math.sin(S.truck.a))>Math.abs(Math.cos(S.truck.a));
+        if(lightIsRedGroup(fNS?"NS":"EW")&&Math.abs(S.truck.s)>0.6)Trainer.addPenalty(10,"redLight",null,"redLight",4.5);
+        const step=Trainer.route[Trainer.stepIndex];
+        if(step&&step.atIntersectionIndex===near){
+          if(step.dir==="left"&&!S.l)Trainer.addPenalty(5,"signal","left","signal",4);
+          if(step.dir==="right"&&!S.r)Trainer.addPenalty(5,"signal","right","signal",4);
+          if(!Trainer.requiredTurn){Trainer.requiredTurn=step.dir;Trainer.turnStartAngle=S.truck.a;Trainer.setInstruction(Trainer.personality.turnInstruction(step.dir,intersectionNameFromIndex(near)));Trainer.stepIndex++;updateGPSStrip();}
+        }
+      }
+      if(dist>400&&lastIntersection===near)lastIntersection=-1;
+    }
+  }
+}
+
+let last=performance.now();
+(function loop(ts){
+  const dt=(ts-last)/1000;last=ts;upd(dt);
+  x.clearRect(0,0,c.width,c.height);
+  x.save();
+  x.translate(c.width/2,targetTruckScreenY());
+  x.rotate(-S.truck.a-Math.PI/2);
+  x.scale(S.currentZoom,S.currentZoom);
+  x.translate(-S.truck.x,-S.truck.y);
+  drawWorld();drawTruck();drawTrailer();
+  x.restore();
+  requestAnimationFrame(loop);
+})(last);
+</script>
+</body>
+</html>
