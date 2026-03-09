@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>CDL — Air Brake Pre‑Trip Test</title>
+  <style>
+    :root{
+      --bg:#0b0f14;
+      --panel:#0f1722;
+      --panel2:#0c131d;
+      --text:#e8eef7;
+      --muted:#9db0c6;
+      --gold:#ffd700;
+      --red:#ff4d4d;
+      --green:#35d07f;
+      --blue:#2ea8ff;
+      --line:#223044;
+      --btn:#1b2a3d;
+      --btn2:#132033;
+      --shadow: rgba(0,0,0,.45);
+    }
+    *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; font-family:Segoe UI,system-ui,-apple-system,Arial,sans-serif;}
+    body{margin:0;background:linear-gradient(180deg,#070a0f,#0b0f14);color:var(--text);}
+    #topbar{
+      position:sticky;top:0;z-index:5;
+      background:rgba(10,14,20,.92);
+      border-bottom:1px solid var(--line);
+      padding:10px 12px;
+      box-shadow:0 6px 18px var(--shadow);
+    }
+    #title{font-weight:900;letter-spacing:.3px}
+    #subtitle{margin-top:2px;color:var(--muted);font-size:12px;line-height:1.2}
+    #wrap{max-width:980px;margin:0 auto;padding:12px;display:grid;gap:12px;grid-template-columns:1.15fr .85fr;}
+    @media (max-width: 880px){#wrap{grid-template-columns:1fr;}}
+    .card{
+      background:linear-gradient(180deg,var(--panel),var(--panel2));
+      border:1px solid var(--line);
+      border-radius:14px;
+      box-shadow:0 10px 26px var(--shadow);
+      overflow:hidden;
+    }
+    .card h2{
+      margin:0;padding:10px 12px;
+      border-bottom:1px solid var(--line);
+      font-size:14px;color:var(--gold);
+      letter-spacing:.2px;
+    }
+    .card .body{padding:12px;}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+    .pill{
+      padding:6px 10px;border-radius:999px;
+      background:#0b1320;border:1px solid var(--line);
+      font-size:12px;color:var(--muted);
+      display:flex;gap:8px;align-items:center;
+    }
+    .pill b{color:var(--text);font-weight:900}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    @media (max-width:540px){.grid2{grid-template-columns:1fr;}}
+    .gauge{
+      border:1px solid var(--line);border-radius:12px;padding:10px;
+      background:rgba(5,9,14,.55);
+    }
+    .gTop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;}
+    .gName{font-weight:900;font-size:12px;color:var(--muted)}
+    .gVal{font-weight:1000;font-size:22px;letter-spacing:.2px}
+    .bar{
+      margin-top:10px;height:10px;border-radius:999px;
+      background:#07101a;border:1px solid var(--line);overflow:hidden;
+    }
+    .bar > div{height:100%;width:0%;background:linear-gradient(90deg,#1f6fff,#2ee7ff);border-radius:999px;}
+    .bar.red > div{background:linear-gradient(90deg,#ff3d3d,#ffb23d);}
+    .bar.green > div{background:linear-gradient(90deg,#22c55e,#35d07f);}
+    .hint{margin-top:8px;color:var(--muted);font-size:12px;line-height:1.25}
+    .btnRow{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+    @media (max-width:540px){.btnRow{grid-template-columns:repeat(2,1fr);}}
+    button{
+      border-radius:12px;border:1px solid var(--line);
+      background:linear-gradient(180deg,var(--btn),var(--btn2));
+      color:var(--text);
+      padding:10px 10px;
+      font-weight:900;font-size:12px;
+      cursor:pointer;
+      user-select:none;
+    }
+    button:active{transform:scale(.985)}
+    button.on{border-color:var(--gold);color:var(--gold)}
+    button.danger{border-color:#4a1f1f}
+    button.danger.on{border-color:var(--red);color:var(--red)}
+    button.good.on{border-color:var(--green);color:var(--green)}
+    button.blue.on{border-color:var(--blue);color:var(--blue)}
+    .log{
+      height:320px;overflow:auto;
+      background:rgba(2,6,10,.6);
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:10px;
+      font-size:12px;
+      color:#cfe0f7;
+      line-height:1.35;
+      white-space:pre-wrap;
+    }
+    .step{
+      padding:10px;border-radius:12px;border:1px solid var(--line);
+      background:rgba(4,9,14,.55);
+    }
+    .stepTitle{font-weight:1000;color:var(--gold);font-size:13px;margin-bottom:6px}
+    .stepText{color:var(--muted);font-size:12px;line-height:1.25}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--line);font-size:11px;color:var(--muted);margin-left:8px}
+    .foot{margin-top:8px;color:var(--muted);font-size:11px;line-height:1.3}
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <div id="title">CDL — Air Brake Pre‑Trip Test (Practice)</div>
+    <div id="subtitle">
+      Single‑file trainer. Simulates: build pressure • governor cut‑out • applied leak • low‑air warning • spring brake pop‑out.
+      This is a practice aid, not legal advice.
+    </div>
+  </div>
+
+  <div id="wrap">
+    <div class="card">
+      <h2>Controls</h2>
+      <div class="body">
+        <div class="btnRow">
+          <button id="btnEngine" class="blue">ENGINE</button>
+          <button id="btnFastIdle" class="blue">FAST IDLE</button>
+          <button id="btnFan" class="danger">FAN AIR</button>
+          <button id="btnApply" class="danger">APPLY BRAKE</button>
+          <button id="btnRelease" class="good">RELEASE BRAKE</button>
+          <button id="btnPark" class="danger">PARK (SPRING)</button>
+          <button id="btnChock" class="good">WHEELS CHOCKED</button>
+          <button id="btnReset" class="danger">RESET</button>
+        </div>
+
+        <div style="height:10px"></div>
+
+        <div class="row">
+          <div class="pill"><span>Status:</span> <b id="statusText">Ready</b></div>
+          <div class="pill"><span>Compressor:</span> <b id="compText">OFF</b></div>
+          <div class="pill"><span>Governor:</span> <b id="govText">—</b></div>
+          <div class="pill"><span>Warnings:</span> <b id="warnText">None</b></div>
+        </div>
+
+        <div style="height:10px"></div>
+
+        <div class="grid2">
+          <div class="gauge">
+            <div class="gTop">
+              <div class="gName">Primary (PSI)</div>
+              <div class="gVal" id="priVal">0</div>
+            </div>
+            <div class="bar" id="priBar"><div></div></div>
+            <div class="hint">Used in leak tests and warning thresholds.</div>
+          </div>
+          <div class="gauge">
+            <div class="gTop">
+              <div class="gName">Secondary (PSI)</div>
+              <div class="gVal" id="secVal">0</div>
+            </div>
+            <div class="bar" id="secBar"><div></div></div>
+            <div class="hint">Some tractors call this “rear” or “service” system.</div>
+          </div>
+
+          <div class="gauge">
+            <div class="gTop">
+              <div class="gName">Air Rate (PSI/min)</div>
+              <div class="gVal" id="rateVal">0.0</div>
+            </div>
+            <div class="bar green" id="rateBar"><div></div></div>
+            <div class="hint">Positive when building; negative when leaking/fanning.</div>
+          </div>
+
+          <div class="gauge">
+            <div class="gTop">
+              <div class="gName">Parking (Spring) Brake</div>
+              <div class="gVal" id="parkVal">SET</div>
+            </div>
+            <div class="bar red" id="parkBar"><div></div></div>
+            <div class="hint">Pop‑out occurs automatically at low PSI.</div>
+          </div>
+        </div>
+
+        <div class="foot">
+          Tip: For leak tests, you typically want engine <b>off</b>, key <b>on</b>, brakes applied, and watch PSI drop for 1 minute.
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Step Guide</h2>
+      <div class="body">
+        <div class="step">
+          <div class="stepTitle">Recommended Order <span class="badge" id="stepBadge">Step 1</span></div>
+          <div class="stepText" id="stepText">
+            1) Chock wheels. 2) Start engine & build air to governor cut‑out. 3) Shut engine off. 4) Applied leak test. 5) Low‑air warning. 6) Spring brake pop‑out.
+          </div>
+        </div>
+        <div style="height:10px"></div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const UI = {
+  status: document.getElementById('statusText'),
+  comp: document.getElementById('compText'),
+  gov: document.getElementById('govText'),
+  warn: document.getElementById('warnText'),
+  priVal: document.getElementById('priVal'),
+  secVal: document.getElementById('secVal'),
+  rateVal: document.getElementById('rateVal'),
+  parkVal: document.getElementById('parkVal'),
+  priBar: document.getElementById('priBar').firstElementChild,
+  secBar: document.getElementById('secBar').firstElementChild,
+  rateBar: document.getElementById('rateBar').firstElementChild,
+  parkBar: document.getElementById('parkBar').firstElementChild,
+  log: document.getElementById('log'),
+  stepBadge: document.getElementById('stepBadge'),
+  stepText: document.getElementById('stepText'),
+  btnEngine: document.getElementById('btnEngine'),
+  btnFastIdle: document.getElementById('btnFastIdle'),
+  btnFan: document.getElementById('btnFan'),
+  btnApply: document.getElementById('btnApply'),
+  btnRelease: document.getElementById('btnRelease'),
+  btnPark: document.getElementById('btnPark'),
+  btnChock: document.getElementById('btnChock'),
+  btnReset: document.getElementById('btnReset'),
+};
+
+function logLine(msg){
+  const t = new Date();
+  const hh = String(t.getHours()).padStart(2,'0');
+  const mm = String(t.getMinutes()).padStart(2,'0');
+  const ss = String(t.getSeconds()).padStart(2,'0');
+  UI.log.textContent = `[${hh}:${mm}:${ss}] ${msg}\n` + UI.log.textContent;
+}
+
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+const CFG = {
+  maxPSI: 140,
+  cutIn: 85,
+  cutOut: 120,
+  lowAirWarn: 60,
+  springPop: 30,
+
+  // Faster build (per tank)
+  buildRateIdle: 70.0,
+  buildRateFast: 100.0,
+
+  // Faster fan-down so you can reach low-air quicker
+  fanRate: 90.0,
+
+  baseLeak: 0.6,
+  appliedLeakExtra: 1.8,
+};
+
+const State = {
+  engineOn: false,
+  fastIdle: false,
+  wheelsChocked: false,
+  brakeApplied: false,
+  parkingSet: true,
+
+  pri: 0,
+  sec: 0,
+
+  compressorOn: false,
+  governor: "—",
+  warnings: [],
+  ratePri: 0,
+  rateSec: 0,
+
+  step: 1,
+  lastStepMsg: ""
+};
+
+function setStep(n, msg){
+  if(State.step !== n || State.lastStepMsg !== msg){
+    State.step = n;
+    State.lastStepMsg = msg || "";
+    UI.stepBadge.textContent = `Step ${n}`;
+    if(msg) UI.stepText.textContent = msg;
+  }
+}
+
+function updateDerived(){
+  State.warnings = [];
+  if(State.pri <= CFG.lowAirWarn || State.sec <= CFG.lowAirWarn){
+    State.warnings.push("LOW AIR");
+  }
+
+  // Governor logic
+  if(State.engineOn){
+    const aboveOut = (State.pri >= CFG.cutOut) && (State.sec >= CFG.cutOut);
+    if(aboveOut){
+      State.compressorOn = false;
+      State.governor = "CUT‑OUT";
+    }else{
+      State.compressorOn = true;
+      State.governor = (State.pri <= CFG.cutIn || State.sec <= CFG.cutIn) ? "CUT‑IN" : "BUILDING";
+    }
+  }else{
+    State.compressorOn = false;
+    State.governor = "ENGINE OFF";
+  }
+
+  // Spring brake pop-out
+  if(!State.parkingSet && (State.pri <= CFG.springPop || State.sec <= CFG.springPop)){
+    State.parkingSet = true;
+    logLine("Spring brake POP‑OUT (parking brake set automatically).");
+  }
+}
+
+function psiBar(p){ return clamp((p/CFG.maxPSI)*100, 0, 100); }
+
+function render(){
+  UI.priVal.textContent = Math.round(State.pri);
+  UI.secVal.textContent = Math.round(State.sec);
+  UI.priBar.style.width = psiBar(State.pri)+"%";
+  UI.secBar.style.width = psiBar(State.sec)+"%";
+
+  const avgRate = (State.ratePri + State.rateSec)/2;
+  UI.rateVal.textContent = avgRate.toFixed(1);
+  UI.rateBar.style.width = clamp(Math.abs(avgRate)/100*100, 0, 100)+"%";
+  UI.rateBar.parentElement.className = "bar " + (avgRate>=0 ? "green" : "red");
+
+  UI.parkVal.textContent = State.parkingSet ? "SET" : "RELEASED";
+  UI.parkBar.style.width = State.parkingSet ? "100%" : "15%";
+
+  UI.status.textContent = State.engineOn ? "Engine running" : "Engine off";
+  UI.comp.textContent = State.compressorOn ? "ON" : "OFF";
+  UI.gov.textContent = State.governor;
+
+  UI.warn.textContent = State.warnings.length ? State.warnings.join(", ") : "None";
+  UI.warn.style.color = State.warnings.length ? "var(--red)" : "var(--muted)";
+
+  UI.btnEngine.classList.toggle("on", State.engineOn);
+  UI.btnFastIdle.classList.toggle("on", State.fastIdle && State.engineOn);
+  UI.btnApply.classList.toggle("on", State.brakeApplied);
+  UI.btnRelease.classList.toggle("on", !State.brakeApplied);
+  UI.btnPark.classList.toggle("on", State.parkingSet);
+  UI.btnChock.classList.toggle("on", State.wheelsChocked);
+}
+
+function resetAll(){
+  State.engineOn=false;
+  State.fastIdle=false;
+  State.wheelsChocked=false;
+  State.brakeApplied=false;
+  State.parkingSet=true;
+
+  State.pri=0;
+  State.sec=0;
+
+  State.ratePri=0;
+  State.rateSec=0;
+
+  State.step=1;
+  State.lastStepMsg="";
+  logLine("Reset.");
+  setStep(1,"Step 1: CHOCK WHEELS. Click WHEELS CHOCKED to continue.");
+  updateDerived();
+  render();
+}
+
+function tick(dt){
+  const dtMin = dt/60;
+
+  let leakPri = CFG.baseLeak;
+  let leakSec = CFG.baseLeak;
+
+  if(State.brakeApplied){
+    leakPri += CFG.appliedLeakExtra;
+    leakSec += CFG.appliedLeakExtra;
+  }
+
+  let buildPri = 0, buildSec = 0;
+  if(State.compressorOn){
+    const rate = State.fastIdle ? CFG.buildRateFast : CFG.buildRateIdle;
+    buildPri = rate;
+    buildSec = rate;
+  }
+
+  State.ratePri = buildPri - leakPri;
+  State.rateSec = buildSec - leakSec;
+
+  State.pri = clamp(State.pri + State.ratePri*dtMin, 0, CFG.maxPSI);
+  State.sec = clamp(State.sec + State.rateSec*dtMin, 0, CFG.maxPSI);
+
+  updateDerived();
+
+  // Step progression (FIXED: includes step 4+)
+  if(State.step===1 && State.wheelsChocked){
+    setStep(2,"Step 2: START ENGINE. Build air to CUT‑OUT (typically 120 PSI). Use FAST IDLE to build quicker.");
+    logLine("Step 2 started: build air.");
+  }
+
+  if(State.step===2 && State.engineOn && State.governor==="CUT‑OUT"){
+    setStep(3,"Step 3: Turn ENGINE OFF. APPLY BRAKE and observe PSI drop (leak test).");
+    logLine("Governor cut‑out reached.");
+  }
+
+  // Step 3 -> 4: once engine is OFF and brake is applied, begin leak test
+  if(State.step===3 && !State.engineOn && State.brakeApplied){
+    setStep(4,"Step 4: Fan down / keep bleeding air until LOW‑AIR warning (about 60 PSI).");
+    logLine("Leak test started (engine off + brake applied).");
+  }
+
+  // Step 4 -> 5: low air warning reached
+  if(State.step===4 && (State.pri<=CFG.lowAirWarn || State.sec<=CFG.lowAirWarn)){
+    setStep(5,"Step 5: Keep fanning down. Spring brake should POP‑OUT around ~30 PSI (varies by vehicle).");
+    logLine("Low‑air warning threshold reached.");
+  }
+
+  // Step 5 -> 6: spring brake pop-out
+  if(State.step===5 && State.parkingSet){
+    setStep(6,"Step 6: Spring brake pop‑out happened. Test complete. Press RESET to practice again.");
+    logLine("Spring brake pop‑out confirmed.");
+  }
+
+  render();
+}
+
+// Actions
+UI.btnEngine.addEventListener('click',()=>{
+  State.engineOn = !State.engineOn;
+  if(!State.engineOn) State.fastIdle=false;
+  logLine(State.engineOn ? "Engine ON." : "Engine OFF.");
+  updateDerived();
+  render();
+});
+UI.btnFastIdle.addEventListener('click',()=>{
+  if(!State.engineOn){ logLine("Fast idle requires engine ON."); return; }
+  State.fastIdle = !State.fastIdle;
+  logLine(State.fastIdle ? "Fast idle ON." : "Fast idle OFF.");
+  render();
+});
+UI.btnChock.addEventListener('click',()=>{
+  State.wheelsChocked = !State.wheelsChocked;
+  logLine(State.wheelsChocked ? "Wheels chocked." : "Chocks removed.");
+  render();
+});
+UI.btnApply.addEventListener('click',()=>{ State.brakeApplied = true; logLine("Service brake APPLIED."); render(); });
+UI.btnRelease.addEventListener('click',()=>{ State.brakeApplied = false; logLine("Service brake RELEASED."); render(); });
+UI.btnPark.addEventListener('click',()=>{
+  if(State.parkingSet){
+    if(State.pri <= CFG.springPop || State.sec <= CFG.springPop){ logLine("Cannot RELEASE parking brake: air too low."); return; }
+    State.parkingSet=false; logLine("Parking (spring) brake RELEASED.");
+  }else{
+    State.parkingSet=true; logLine("Parking (spring) brake SET.");
+  }
+  render();
+});
+UI.btnFan.addEventListener('click',()=>{
+  const dropPerSec = CFG.fanRate / 60;
+  const seconds = 1.0;
+  State.pri = clamp(State.pri - dropPerSec*seconds, 0, CFG.maxPSI);
+  State.sec = clamp(State.sec - dropPerSec*seconds, 0, CFG.maxPSI);
+  logLine("Fanned air (quick pressure drop).");
+  updateDerived();
+  render();
+});
+UI.btnReset.addEventListener('click', resetAll);
+
+let last = performance.now();
+function loop(t){
+  const dt = Math.min(0.05, (t-last)/1000);
+  last = t;
+  tick(dt);
+  requestAnimationFrame(loop);
+}
+resetAll();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
