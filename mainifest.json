@@ -1,0 +1,92 @@
+{
+  "name": "MyClass1TrainingApp",
+  "short_name": "MyClass1",
+  "description": "CDL Class 1 Driver Training Simulator – Air Brakes, Components, Pre-Trip, and Open-World Driving",
+  "start_url": "index.html",
+  "display": "standalone",
+  "display_override": ["fullscreen", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#1a1a2e",
+  "theme_color": "#ffd700",
+  "scope": "/",
+  "id": "myclass1trainingapp",
+  "categories": ["education", "productivity"],
+  "lang": "en",
+  "dir": "ltr",
+
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+
+  "screenshots": [
+    {
+      "src": "screenshots/screenshot-wide-1.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Air Brakes Simulator Dashboard"
+    },
+    {
+      "src": "screenshots/screenshot-wide-2.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Pre-Trip Inspection Zones"
+    },
+    {
+      "src": "screenshots/screenshot-wide-3.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Open-World Driving Simulator"
+    },
+    {
+      "src": "screenshots/screenshot-narrow-1.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Air Brakes Training"
+    },
+    {
+      "src": "screenshots/screenshot-narrow-2.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Components Test Quiz"
+    }
+  ],
+
+  "shortcuts": [
+    {
+      "name": "Air Brakes",
+      "short_name": "Air Brakes",
+      "description": "Start Air Brake Pre-Trip Simulator",
+      "url": "airbrake.html",
+      "icons": [{ "src": "icons/shortcut-airbrakes.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Pre-Trip Inspection",
+      "short_name": "Pre-Trip",
+      "description": "Full CDL Pre-Trip Checklist",
+      "url": "pretrip.html",
+      "icons": [{ "src": "icons/shortcut-pretrip.png", "sizes": "192x192" }]
+    }
+  ]
+}
