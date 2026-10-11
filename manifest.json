@@ -1,0 +1,77 @@
+{
+  "name": "MyAirBrakeTrainerApp",
+  "short_name": "Air Brakes Trainer",
+  "description": "Air brake training simulator – pre-trip air brake test, component encyclopedia, quiz and scenario trainer",
+  "start_url": "./index.html",
+  "scope": "./",
+  "id": "airbraketrainer",
+  "display": "standalone",
+  "background_color": "#1a1a2e",
+  "theme_color": "#ffd700",
+  "categories": [
+    "education",
+    "productivity"
+  ],
+  "lang": "en-CA",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "screenshot1/home.png",
+      "sizes": "1980x1080",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Air Brake Trainer home screen"
+    },
+    {
+      "src": "screenshot2/air-brakes.png",
+      "sizes": "1980x1080",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Air brake pre-trip test dashboard simulator"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Air Brakes",
+      "short_name": "Air Brakes",
+      "url": "airbrake.html",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Components Test",
+      "short_name": "Components Test",
+      "url": "components_test.html",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}
