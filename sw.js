@@ -1,52 +1,62 @@
-const CACHE_NAME = 'cdl-driving-v1';
-const ASSETS = [
-  './text1.html',
-  './manifest.json'
+// Gamache Apps service worker: lets the app install and run offline.
+// Change VERSION whenever you upload new files so everyone gets the update.
+const VERSION = 'class1-v10';
+const FILES = [
+  "./",
+  "./index.html",
+  "./manifest.json",
+  "./drive.html",
+  "./airbrake.html",
+  "./components_test.html",
+  "./truck.JPG",
+  "./pretrip.html",
+  "./icons/icon-1024.png",
+  "./icons/icon-192.png",
+  "./icons/icon-512.png"
 ];
 
-// Install: cache all core assets
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
-  );
   self.skipWaiting();
-});
-
-// Activate: clean up old caches
-self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys
-          .filter(key => key !== CACHE_NAME)
-          .map(key => caches.delete(key))
-      )
+    caches.open(VERSION).then(cache =>
+      Promise.allSettled(FILES.map(f => cache.add(f)))
     )
   );
-  self.clients.claim();
 });
 
-// Fetch: serve from cache, fall back to network
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
+});
+
 self.addEventListener('fetch', event => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+
+  // Pages: get the newest copy when online, use the saved copy when offline.
+  if (req.mode === 'navigate') {
+    event.respondWith(
+      fetch(req).then(res => {
+        if (res && res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }
+        return res;
+      }).catch(() =>
+        caches.match(req, { ignoreSearch: true }).then(hit => hit || caches.match('./index.html'))
+      )
+    );
+    return;
+  }
+
+  // Everything else: use the saved copy right away and refresh it in the background.
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      if (cached) return cached;
-      return fetch(event.request).then(response => {
-        // Only cache same-origin GET requests
-        if (
-          event.request.method === 'GET' &&
-          event.request.url.startsWith(self.location.origin)
-        ) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        }
-        return response;
-      });
-    }).catch(() => {
-      // Offline fallback for HTML navigation requests
-      if (event.request.destination === 'document') {
-        return caches.match('./text1.html');
-      }
+    caches.match(req, { ignoreSearch: true }).then(hit => {
+      const net = fetch(req).then(res => {
+        if (res && (res.ok || res.type === 'opaque')) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }
+        return res;
+      }).catch(() => hit);
+      return hit || net;
     })
   );
 });
